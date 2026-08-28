@@ -30,6 +30,14 @@ def salvar_estado(estado):
     except Exception as e:
         print("Erro ao salvar estado:", e)
 
+def obter_preco_btc():
+    """Busca o preço do BTC via Binance US (compatível com o servidor Render nos EUA)."""
+    url = "https://api.binance.us/api/v3/ticker/price?symbol=BTCUSDT"
+    r = httpx.get(url, timeout=10.0)
+    r.raise_for_status()
+    dados = r.json()
+    return float(dados["price"])
+
 if os.path.exists("serviceAccountKey.json"):
     cred = credentials.Certificate("serviceAccountKey.json")
     firebase_admin.initialize_app(cred)
@@ -49,14 +57,7 @@ def configurar_alarme():
         return jsonify({"status": "erro", "mensagem": "Dados invalidos"}), 400
 
     try:
-        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10.0)
-        r.raise_for_status()
-        dados_binance = r.json()
-
-        if "price" not in dados_binance:
-            return jsonify({"status": "erro", "mensagem": f"Resposta inesperada Binance: {dados_binance}"}), 500
-
-        preco_atual = float(dados_binance["price"])
+        preco_atual = obter_preco_btc()
         modo = "ACIMA" if alvo > preco_atual else "ABAIXO"
         
         estado = {
@@ -84,14 +85,7 @@ def checar_btc():
         return jsonify({"status": "aguardando", "mensagem": "Nenhum alarme ativo no servidor."}), 200
 
     try:
-        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10.0)
-        r.raise_for_status()
-        dados_binance = r.json()
-
-        if "price" not in dados_binance:
-            return jsonify({"status": "erro", "mensagem": f"Resposta inesperada Binance: {dados_binance}"}), 500
-
-        preco_atual = float(dados_binance["price"])
+        preco_atual = obter_preco_btc()
         alvo = estado["preco_alvo"]
         modo = estado["modo_alarme"]
         
