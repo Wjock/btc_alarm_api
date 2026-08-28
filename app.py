@@ -9,7 +9,6 @@ app = Flask(__name__)
 
 ARQUIVO_ESTADO = "alarme_estado.json"
 
-# --- FUNÇÕES PARA LER E SALVAR O ESTADO EM ARQUIVO ---
 def carregar_estado():
     if os.path.exists(ARQUIVO_ESTADO):
         try:
@@ -31,35 +30,33 @@ def salvar_estado(estado):
     except Exception as e:
         print("Erro ao salvar estado:", e)
 
-# 2. INICIALIZAÇÃO DO FIREBASE ADMIN SDK
 if os.path.exists("serviceAccountKey.json"):
     cred = credentials.Certificate("serviceAccountKey.json")
     firebase_admin.initialize_app(cred)
 
-# -------------------------------------------------------------------
-# ROTA RAIZ: Para testar se a API está no ar pelo navegador
-# -------------------------------------------------------------------
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "online", "mensagem": "API Alarme BTC no ar!"}), 200
 
-# -------------------------------------------------------------------
-# ENDPOINT 1: O Celular Kotlin envia o Alvo e o Token do Firebase aqui
-# -------------------------------------------------------------------
 @app.route('/configurar_alarme', methods=['POST'])
 def configurar_alarme():
-    dados = request.get_json()
+    dados = request.get_json() or {}
     
     alvo = float(dados.get('preco_alvo', 0))
     token = dados.get('fcm_token', '')
     
     if alvo <= 0 or not token:
-        return jsonify({"status": "erro", "mensagem": "Dados inválidos"}), 400
+        return jsonify({"status": "erro", "mensagem": "Dados invalidos"}), 400
 
     try:
-        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5.0)
-        preco_atual = float(r.json()["price"])
-        
+        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10.0)
+        r.raise_for_status()
+        dados_binance = r.json()
+
+        if "price" not in dados_binance:
+            return jsonify({"status": "erro", "mensagem": f"Resposta inesperada Binance: {dados_binance}"}), 500
+
+        preco_atual = float(dados_binance["price"])
         modo = "ACIMA" if alvo > preco_atual else "ABAIXO"
         
         estado = {
@@ -69,7 +66,6 @@ def configurar_alarme():
             "ativo": True
         }
         
-        # Salva no arquivo no disco
         salvar_estado(estado)
         
         return jsonify({
@@ -80,21 +76,22 @@ def configurar_alarme():
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
-# -------------------------------------------------------------------
-# ENDPOINT 2: O Cron (cron-job.org) chama esta rota a cada 1 minuto
-# -------------------------------------------------------------------
 @app.route('/checar_btc', methods=['GET'])
 def checar_btc():
-    # Carrega do arquivo no disco
     estado = carregar_estado()
 
     if not estado["ativo"] or estado["preco_alvo"] is None:
         return jsonify({"status": "aguardando", "mensagem": "Nenhum alarme ativo no servidor."}), 200
 
     try:
-        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5.0)
-        preco_atual = float(r.json()["price"])
-        
+        r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10.0)
+        r.raise_for_status()
+        dados_binance = r.json()
+
+        if "price" not in dados_binance:
+            return jsonify({"status": "erro", "mensagem": f"Resposta inesperada Binance: {dados_binance}"}), 500
+
+        preco_atual = float(dados_binance["price"])
         alvo = estado["preco_alvo"]
         modo = estado["modo_alarme"]
         
@@ -108,10 +105,9 @@ def checar_btc():
             enviar_notificacao_push(
                 token=estado["fcm_token"],
                 titulo="🚨 ALVO ATINGIDO! 🚨",
-                corpo=f"O Bitcoin cruzou o Alvo de U$ {alvo:,.2f}! (Preço Atual: U$ {preco_atual:,.2f})"
+                corpo=f"O Bitcoin cruzou o Alvo de U$ {alvo:,.2f}! (Preco Atual: U$ {preco_atual:,.2f})"
             )
             
-            # Desativa o alarme e salva a alteração no disco
             estado["ativo"] = False
             salvar_estado(estado)
             
@@ -138,7 +134,7 @@ def enviar_notificacao_push(token, titulo, corpo):
         token=token,
     )
     resposta = messaging.send(mensagem)
-    print("Notificação enviada com sucesso:", resposta)
+    print("Notificacao enviada com sucesso:", resposta)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
