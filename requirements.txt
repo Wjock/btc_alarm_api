@@ -1,4 +1,3 @@
 flask
-httpx
+requests
 gunicorn
-firebase-admin
