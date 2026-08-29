@@ -11,18 +11,19 @@ app = FastAPI(title="BTC Alarm API")
 # Inicialização do Firebase Admin SDK
 # ---------------------------------------------------------
 FIREBASE_KEY_PATH = "firebase-key.json"
+RENDER_KEY_PATH = "/etc/secrets/serviceAccountKey.json"
 
+# Procura o arquivo localmente ou no caminho de segredos do Render
 if os.path.exists(FIREBASE_KEY_PATH):
     cred = credentials.Certificate(FIREBASE_KEY_PATH)
     firebase_admin.initialize_app(cred)
-    print("Firebase Admin SDK inicializado com sucesso.")
+    print("Firebase Admin SDK inicializado localmente.")
+elif os.path.exists(RENDER_KEY_PATH):
+    cred = credentials.Certificate(RENDER_KEY_PATH)
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin SDK inicializado no Render.")
 else:
-    print(f"AVISO: Arquivo '{FIREBASE_KEY_PATH}' não encontrado. Notificações desativadas.")
-
-# Armazenamento em memória (Simples)
-device_tokens = set()
-alarm_settings = {"target_price": 0.0, "active": False}
-
+    print("AVISO: Credenciais do Firebase não encontradas. Notificações desativadas.")
 
 # ---------------------------------------------------------
 # Modelos de Dados (Pydantic)
@@ -60,15 +61,26 @@ def set_alarm(data: AlarmSchema):
 
 @app.get("/check-price")
 def check_price():
-    """Consulta o preço atual do BTC e envia notificação se atingir o alvo"""
-    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+    """Consulta o preço do BTC usando os 3 endpoints oficiais da Binance em cascata"""
+    endpoints = [
+        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+        "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+        "https://api2.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+    ]
     
-    try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        current_price = float(data["bitcoin"]["usd"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao buscar preço: {str(e)}")
+    current_price = None
+
+    for url in endpoints:
+        try:
+            r = requests.get(url, timeout=5)
+            if r.status_code == 200:
+                current_price = float(r.json()["price"])
+                break  # Conseguiu a cotação, sai do loop
+        except Exception:
+            continue  # Se falhar, tenta o próximo servidor da Binance
+
+    if current_price is None:
+        raise HTTPException(status_code=500, detail="Erro: NENHUM dos 3 endpoints da Binance respondeu.")
 
     triggered = False
     
@@ -83,7 +95,6 @@ def check_price():
         "alarm_active": alarm_settings["active"],
         "triggered": triggered
     }
-
 
 def send_fcm_notification(price: float):
     """Envia a notificação Push via Firebase Cloud Messaging"""
