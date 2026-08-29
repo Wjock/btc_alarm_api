@@ -11,14 +11,26 @@ tipo_alarme = None  # "SUBIDA" ou "QUEDA"
 preco_base = None
 
 def checar_preco_btc():
-    """Busca o preço do BTC na Binance"""
+    """Busca o preço do BTC na Binance com cabeçalhos apropriados"""
     try:
         url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        resposta = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resposta = requests.get(url, headers=headers, timeout=10)
+        
+        if resposta.status_code != 200:
+            print(f"[Erro API Binance] Status: {resposta.status_code} | Resposta: {resposta.text}")
+            return None
+            
         dados = resposta.json()
-        return float(dados["price"])
+        if "price" in dados:
+            return float(dados["price"])
+        else:
+            print(f"[Erro API Binance] Campo 'price' nao encontrado: {dados}")
+            return None
     except Exception as e:
-        print(f"Erro ao buscar preço: {e}")
+        print(f"[Exceção ao buscar preço]: {e}")
         return None
 
 def monitor_loop():
@@ -30,7 +42,7 @@ def monitor_loop():
             preco_atual = checar_preco_btc()
             
             if preco_atual:
-                print(f"[Checagem] BTC Atual: USD {preco_atual:.2f} | Alvo ({tipo_alarme}): USD {alvo_atual:.2f}")
+                print(f"[Checagem 1min] BTC: USD {preco_atual:.2f} | Alvo ({tipo_alarme}): USD {alvo_atual:.2f}")
                 
                 disparar = False
                 if tipo_alarme == "SUBIDA" and preco_atual >= alvo_atual:
@@ -40,13 +52,13 @@ def monitor_loop():
                 
                 if disparar:
                     print(f"🚨 ALARME DISPARADO! BTC atingiu USD {preco_atual:.2f}")
-                    # AQUI entra o envio da notificação Push via Firebase/Webhooks
+                    # AQUI faremos o disparo do aviso para o celular via Firebase
                     
-                    # Reseta o alarme após disparar (espera o novo alvo do celular)
+                    # Reseta o alarme após disparar
                     alvo_atual = None
                     tipo_alarme = None
         
-        # Aguarda 1 minuto (60 segundos) para manter o plano grátis leve
+        # Aguarda 60 segundos
         time.sleep(60)
 
 # Rota para o celular consultar a cotação atual
@@ -72,7 +84,7 @@ def definir_alvo():
     if not preco_atual:
         return jsonify({"erro": "Falha ao obter preco atual do BTC"}), 500
     
-    # Lógica Inteligente: Define sozinho se é alarme de SUBIDA ou QUEDA
+    # Lógica Inteligente: Define sozinho se é SUBIDA ou QUEDA
     alvo_atual = novo_alvo
     preco_base = preco_atual
     
@@ -81,7 +93,7 @@ def definir_alvo():
     else:
         tipo_alarme = "QUEDA"
         
-    print(f"Novo alvo recebido: USD {alvo_atual} | Tipo: {tipo_alarme} | Preco atual: USD {preco_atual}")
+    print(f"Novo alvo recebido: USD {alvo_atual} | Tipo: {tipo_alarme} | Preço atual: USD {preco_atual}")
     
     return jsonify({
         "status": "sucesso",
@@ -91,9 +103,9 @@ def definir_alvo():
     }), 200
 
 if __name__ == "__main__":
-    # Inicia a thread de monitoramento em segundo plano
+    # Inicia a thread de monitoramento contínuo
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
     
-    # Inicia o servidor web
+    # Inicia o servidor Flask
     app.run(host="0.0.0.0", port=5000)
