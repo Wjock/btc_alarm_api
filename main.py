@@ -1,109 +1,106 @@
-import time
+import os
 import requests
-import threading
-from flask import Flask, request, jsonify
+import firebase_admin
+from firebase_admin import credentials, messaging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-app = Flask(__name__)
+app = FastAPI(title="BTC Alarm API")
 
-# Variáveis globais para armazenar o estado do alarme
-alvo_atual = None
-tipo_alarme = None  # "SUBIDA" ou "QUEDA"
-preco_base = None
+# ---------------------------------------------------------
+# Inicialização do Firebase Admin SDK
+# ---------------------------------------------------------
+FIREBASE_KEY_PATH = "firebase-key.json"
 
-def checar_preco_btc():
-    """Busca o preço do BTC usando rotas oficiais da Binance com fallback"""
-    urls = [
-        "https://api3.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api.binance.us/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-    ]
+if os.path.exists(FIREBASE_KEY_PATH):
+    cred = credentials.Certificate(FIREBASE_KEY_PATH)
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin SDK inicializado com sucesso.")
+else:
+    print(f"AVISO: Arquivo '{FIREBASE_KEY_PATH}' não encontrado. Notificações desativadas.")
+
+# Armazenamento em memória (Simples)
+device_tokens = set()
+alarm_settings = {"target_price": 0.0, "active": False}
+
+
+# ---------------------------------------------------------
+# Modelos de Dados (Pydantic)
+# ---------------------------------------------------------
+class TokenSchema(BaseModel):
+    token: str
+
+class AlarmSchema(BaseModel):
+    target_price: float
+    active: bool
+
+
+# ---------------------------------------------------------
+# Rotas da API
+# ---------------------------------------------------------
+@app.get("/")
+def read_root():
+    return {"status": "online", "message": "API BTC Alarm funcionando!"}
+
+
+@app.post("/register-token")
+def register_token(data: TokenSchema):
+    """Registra o token FCM enviado pelo app Android"""
+    device_tokens.add(data.token)
+    return {"status": "sucesso", "registered_tokens": len(device_tokens)}
+
+
+@app.post("/set-alarm")
+def set_alarm(data: AlarmSchema):
+    """Configura o valor de disparo do alarme"""
+    alarm_settings["target_price"] = data.target_price
+    alarm_settings["active"] = data.active
+    return {"status": "sucesso", "config": alarm_settings}
+
+
+@app.get("/check-price")
+def check_price():
+    """Consulta o preço atual do BTC e envia notificação se atingir o alvo"""
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        current_price = float(data["bitcoin"]["usd"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar preço: {str(e)}")
+
+    triggered = False
+    
+    # Lógica de disparo do alarme
+    if alarm_settings["active"] and current_price >= alarm_settings["target_price"]:
+        triggered = True
+        send_fcm_notification(current_price)
+
+    return {
+        "btc_price_usd": current_price,
+        "target_price": alarm_settings["target_price"],
+        "alarm_active": alarm_settings["active"],
+        "triggered": triggered
     }
-    
-    for url in urls:
+
+
+def send_fcm_notification(price: float):
+    """Envia a notificação Push via Firebase Cloud Messaging"""
+    if not device_tokens:
+        print("Nenhum token cadastrado para envio.")
+        return
+
+    for token in list(device_tokens):
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title="🚨 ALERTA BITCOIN! 🚨",
+                body=f"O BTC atingiu a meta! Preço atual: US$ {price:,.2f}"
+            ),
+            token=token,
+        )
         try:
-            resposta = requests.get(url, headers=headers, timeout=5)
-            if resposta.status_code == 200:
-                dados = resposta.json()
-                if "price" in dados:
-                    return float(dados["price"])
+            messaging.send(message)
+            print(f"Notificação enviada com sucesso para o token: {token[:10]}...")
         except Exception as e:
-            print(f"[Tentativa falhou para {url}]: {e}")
-            continue
-            
-    print("[Erro] Nenhuma rota da Binance respondeu com sucesso.")
-    return None
-
-def monitor_loop():
-    """Loop inteligente em segundo plano que roda a cada 60 segundos"""
-    global alvo_atual, tipo_alarme
-    
-    while True:
-        if alvo_atual is not None and tipo_alarme is not None:
-            preco_atual = checar_preco_btc()
-            
-            if preco_atual:
-                print(f"[Checagem 1min] BTC: USD {preco_atual:.2f} | Alvo ({tipo_alarme}): USD {alvo_atual:.2f}")
-                
-                disparar = False
-                if tipo_alarme == "SUBIDA" and preco_atual >= alvo_atual:
-                    disparar = True
-                elif tipo_alarme == "QUEDA" and preco_atual <= alvo_atual:
-                    disparar = True
-                
-                if disparar:
-                    print(f"🚨 ALARME DISPARADO! BTC atingiu USD {preco_atual:.2f}")
-                    # AQUI entra o envio da notificação no celular
-                    
-                    # Reseta o alarme após disparar
-                    alvo_atual = None
-                    tipo_alarme = None
-        
-        time.sleep(60)
-
-# Rota para o celular consultar a cotação atual
-@app.route("/preco", methods=["GET"])
-def obter_preco():
-    preco = checar_preco_btc()
-    if preco:
-        return jsonify({"btc_usd": preco}), 200
-    return jsonify({"erro": "Nao foi possivel buscar o preco"}), 500
-
-# Rota para o celular definir o novo alvo
-@app.route("/definir-alvo", methods=["POST"])
-def definir_alvo():
-    global alvo_atual, tipo_alarme, preco_base
-    
-    dados = request.get_json()
-    if not dados or "alvo" not in dados:
-        return jsonify({"erro": "Alvo nao fornecido"}), 400
-    
-    novo_alvo = float(dados["alvo"])
-    preco_atual = checar_preco_btc()
-    
-    if not preco_atual:
-        return jsonify({"erro": "Falha ao obter preco atual do BTC"}), 500
-    
-    alvo_atual = novo_alvo
-    preco_base = preco_atual
-    
-    if novo_alvo > preco_atual:
-        tipo_alarme = "SUBIDA"
-    else:
-        tipo_alarme = "QUEDA"
-        
-    print(f"Novo alvo recebido: USD {alvo_atual} | Tipo: {tipo_alarme} | Preço atual: USD {preco_atual}")
-    
-    return jsonify({
-        "status": "sucesso",
-        "alvo": alvo_atual,
-        "tipo": tipo_alarme,
-        "preco_atual": preco_atual
-    }), 200
-
-if __name__ == "__main__":
-    t = threading.Thread(target=monitor_loop, daemon=True)
-    t.start()
-    app.run(host="0.0.0.0", port=5000)
+            print(f"Erro ao enviar para o token {token[:10]}: {e}")
