@@ -61,7 +61,7 @@ def set_alarm(data: AlarmSchema):
 
 @app.get("/check-price")
 def check_price():
-    """Consulta o preço do BTC usando os 3 endpoints oficiais da Binance em cascata com User-Agent"""
+    """Consulta o preço do BTC usando a Binance e usa AwesomeAPI como backup transparente"""
     endpoints = [
         "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
         "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
@@ -71,21 +71,30 @@ def check_price():
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     current_price = None
 
+    # Tenta endpoints da Binance
     for url in endpoints:
         try:
             r = requests.get(url, headers=headers, timeout=5)
             if r.status_code == 200:
                 current_price = float(r.json()["price"])
-                break  # Conseguiu a cotação, sai do loop
+                break
         except Exception:
-            continue  # Se falhar, tenta o próximo servidor da Binance
+            continue
+
+    # Backup automatico caso a Binance bloqueie o servidor Render
+    if current_price is None:
+        try:
+            r = requests.get("https://economia.awesomeapi.com.br/json/last/BTC-USD", headers=headers, timeout=5)
+            if r.status_code == 200:
+                current_price = float(r.json()["BTCUSD"]["bid"])
+        except Exception:
+            pass
 
     if current_price is None:
-        raise HTTPException(status_code=500, detail="Erro: NENHUM dos 3 endpoints da Binance respondeu.")
+        raise HTTPException(status_code=500, detail="Erro ao buscar preco em todas as fontes.")
 
     triggered = False
     
-    # Lógica de disparo do alarme
     if alarm_settings["active"] and current_price >= alarm_settings["target_price"]:
         triggered = True
         send_fcm_notification(current_price)
