@@ -61,7 +61,7 @@ def set_alarm(data: AlarmSchema):
 
 @app.get("/check-price")
 def check_price():
-    """Consulta o preço do BTC usando a Binance e usa AwesomeAPI como backup transparente"""
+    """Consulta preço no BTC com log de erro para diagnostico"""
     endpoints = [
         "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
         "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
@@ -70,28 +70,31 @@ def check_price():
     
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     current_price = None
+    errors = []
 
-    # Tenta endpoints da Binance
     for url in endpoints:
         try:
             r = requests.get(url, headers=headers, timeout=5)
             if r.status_code == 200:
                 current_price = float(r.json()["price"])
                 break
-        except Exception:
-            continue
+            else:
+                errors.append(f"Binance ({url}): HTTP {r.status_code}")
+        except Exception as e:
+            errors.append(f"Binance ({url}): {str(e)}")
 
-    # Backup automatico caso a Binance bloqueie o servidor Render
     if current_price is None:
         try:
             r = requests.get("https://economia.awesomeapi.com.br/json/last/BTC-USD", headers=headers, timeout=5)
             if r.status_code == 200:
                 current_price = float(r.json()["BTCUSD"]["bid"])
-        except Exception:
-            pass
+            else:
+                errors.append(f"AwesomeAPI: HTTP {r.status_code}")
+        except Exception as e:
+            errors.append(f"AwesomeAPI: {str(e)}")
 
     if current_price is None:
-        raise HTTPException(status_code=500, detail="Erro ao buscar preco em todas as fontes.")
+        raise HTTPException(status_code=500, detail={"msg": "Falha geral", "detalhes": errors})
 
     triggered = False
     
@@ -105,6 +108,8 @@ def check_price():
         "alarm_active": alarm_settings["active"],
         "triggered": triggered
     }
+
+
 def send_fcm_notification(price: float):
     """Envia a notificação Push via Firebase Cloud Messaging"""
     if not device_tokens:
