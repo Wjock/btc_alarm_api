@@ -61,40 +61,39 @@ def set_alarm(data: AlarmSchema):
 
 @app.get("/check-price")
 def check_price():
-    """Consulta preço no BTC com log de erro para diagnostico"""
-    endpoints = [
-        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api3.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-    ]
-    
+    """Consulta o preço do BTC usando APIs compatíveis com datacenters (Coinbase -> Kraken -> CoinGecko)"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     current_price = None
-    errors = []
 
-    for url in endpoints:
-        try:
-            r = requests.get(url, headers=headers, timeout=5)
-            if r.status_code == 200:
-                current_price = float(r.json()["price"])
-                break
-            else:
-                errors.append(f"Binance ({url}): HTTP {r.status_code}")
-        except Exception as e:
-            errors.append(f"Binance ({url}): {str(e)}")
+    # Fonte 1: Coinbase
+    try:
+        r = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", headers=headers, timeout=5)
+        if r.status_code == 200:
+            current_price = float(r.json()["data"]["amount"])
+    except Exception:
+        pass
 
+    # Fonte 2: Kraken (Backup 1)
     if current_price is None:
         try:
-            r = requests.get("https://economia.awesomeapi.com.br/json/last/BTC-USD", headers=headers, timeout=5)
+            r = requests.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSD", headers=headers, timeout=5)
             if r.status_code == 200:
-                current_price = float(r.json()["BTCUSD"]["bid"])
-            else:
-                errors.append(f"AwesomeAPI: HTTP {r.status_code}")
-        except Exception as e:
-            errors.append(f"AwesomeAPI: {str(e)}")
+                data = r.json()
+                current_price = float(data["result"]["XXBTZUSD"]["c"][0])
+        except Exception:
+            pass
+
+    # Fonte 3: CoinGecko (Backup 2)
+    if current_price is None:
+        try:
+            r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", headers=headers, timeout=5)
+            if r.status_code == 200:
+                current_price = float(r.json()["bitcoin"]["usd"])
+        except Exception:
+            pass
 
     if current_price is None:
-        raise HTTPException(status_code=500, detail={"msg": "Falha geral", "detalhes": errors})
+        raise HTTPException(status_code=500, detail="Erro: Nenhuma das fontes de preço respondeu.")
 
     triggered = False
     
@@ -108,8 +107,6 @@ def check_price():
         "alarm_active": alarm_settings["active"],
         "triggered": triggered
     }
-
-
 def send_fcm_notification(price: float):
     """Envia a notificação Push via Firebase Cloud Messaging"""
     if not device_tokens:
