@@ -4,6 +4,7 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import yfinance as yf
 
 app = FastAPI(title="BTC Alarm API")
 
@@ -58,47 +59,51 @@ def set_alarm(data: AlarmSchema):
     alarm_settings["active"] = data.active
     return {"status": "sucesso", "config": alarm_settings}
 
-
 @app.get("/check-price")
 def check_price():
-    """Consulta o preço do BTC/USD via Coinbase com backup na Kraken"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    """Consulta o preço do BTC via yfinance (Yahoo Finance) com backup na Coinbase"""
     current_price = None
 
-    # Fonte 1: Coinbase
+    # Fonte Principal: yfinance (Yahoo Finance)
     try:
-        r = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", headers=headers, timeout=5)
-        if r.status_code == 200:
-            current_price = float(r.json()["data"]["amount"])
+        btc = yf.Ticker("BTC-USD")
+        current_price = float(btc.fast_info["lastPrice"])
     except Exception:
         pass
 
-    # Fonte 2: Kraken (Backup)
+    # Backup de emergência: Coinbase
     if current_price is None:
         try:
-            r = requests.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSD", headers=headers, timeout=5)
+            r = requests.get(
+                "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=5
+            )
             if r.status_code == 200:
-                data = r.json()
-                current_price = float(data["result"]["XXBTZUSD"]["c"][0])
+                current_price = float(r.json()["data"]["amount"])
         except Exception:
             pass
 
     if current_price is None:
-        raise HTTPException(status_code=500, detail="Erro ao buscar preço nas APIs públicas.")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro: Falha ao obter preço via Yahoo Finance e Coinbase."
+        )
 
     triggered = False
-    
-    if alarm_settings["active"] and current_price >= alarm_settings["target_price"]:
+    active = alarm_settings.get("active", False)
+    target_price = float(alarm_settings.get("target_price", 0.0))
+
+    if active and current_price >= target_price:
         triggered = True
         send_fcm_notification(current_price)
 
     return {
         "btc_price_usd": current_price,
-        "target_price": alarm_settings["target_price"],
-        "alarm_active": alarm_settings["active"],
+        "target_price": target_price,
+        "alarm_active": active,
         "triggered": triggered
     }
-
 
 
 
