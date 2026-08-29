@@ -61,18 +61,19 @@ def set_alarm(data: AlarmSchema):
 
 @app.get("/check-price")
 def check_price():
-    """Consulta o preço do BTC usando os 3 endpoints oficiais da Binance em cascata"""
+    """Consulta o preço do BTC usando os 3 endpoints oficiais da Binance em cascata com User-Agent"""
     endpoints = [
         "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
         "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api2.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        "https://api3.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
     ]
     
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     current_price = None
 
     for url in endpoints:
         try:
-            r = requests.get(url, timeout=5)
+            r = requests.get(url, headers=headers, timeout=5)
             if r.status_code == 200:
                 current_price = float(r.json()["price"])
                 break  # Conseguiu a cotação, sai do loop
@@ -95,7 +96,6 @@ def check_price():
         "alarm_active": alarm_settings["active"],
         "triggered": triggered
     }
-
 def send_fcm_notification(price: float):
     """Envia a notificação Push via Firebase Cloud Messaging"""
     if not device_tokens:
