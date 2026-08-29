@@ -11,27 +11,30 @@ tipo_alarme = None  # "SUBIDA" ou "QUEDA"
 preco_base = None
 
 def checar_preco_btc():
-    """Busca o preço do BTC na Binance com cabeçalhos apropriados"""
-    try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        resposta = requests.get(url, headers=headers, timeout=10)
-        
-        if resposta.status_code != 200:
-            print(f"[Erro API Binance] Status: {resposta.status_code} | Resposta: {resposta.text}")
-            return None
+    """Busca o preço do BTC usando rotas oficiais da Binance com fallback"""
+    urls = [
+        "https://api3.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+        "https://api.binance.us/api/v3/ticker/price?symbol=BTCUSDT",
+        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+    ]
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    for url in urls:
+        try:
+            resposta = requests.get(url, headers=headers, timeout=5)
+            if resposta.status_code == 200:
+                dados = resposta.json()
+                if "price" in dados:
+                    return float(dados["price"])
+        except Exception as e:
+            print(f"[Tentativa falhou para {url}]: {e}")
+            continue
             
-        dados = resposta.json()
-        if "price" in dados:
-            return float(dados["price"])
-        else:
-            print(f"[Erro API Binance] Campo 'price' nao encontrado: {dados}")
-            return None
-    except Exception as e:
-        print(f"[Exceção ao buscar preço]: {e}")
-        return None
+    print("[Erro] Nenhuma rota da Binance respondeu com sucesso.")
+    return None
 
 def monitor_loop():
     """Loop inteligente em segundo plano que roda a cada 60 segundos"""
@@ -52,13 +55,12 @@ def monitor_loop():
                 
                 if disparar:
                     print(f"🚨 ALARME DISPARADO! BTC atingiu USD {preco_atual:.2f}")
-                    # AQUI faremos o disparo do aviso para o celular via Firebase
+                    # AQUI entra o envio da notificação no celular
                     
                     # Reseta o alarme após disparar
                     alvo_atual = None
                     tipo_alarme = None
         
-        # Aguarda 60 segundos
         time.sleep(60)
 
 # Rota para o celular consultar a cotação atual
@@ -84,7 +86,6 @@ def definir_alvo():
     if not preco_atual:
         return jsonify({"erro": "Falha ao obter preco atual do BTC"}), 500
     
-    # Lógica Inteligente: Define sozinho se é SUBIDA ou QUEDA
     alvo_atual = novo_alvo
     preco_base = preco_atual
     
@@ -103,9 +104,6 @@ def definir_alvo():
     }), 200
 
 if __name__ == "__main__":
-    # Inicia a thread de monitoramento contínuo
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
-    
-    # Inicia o servidor Flask
     app.run(host="0.0.0.0", port=5000)
