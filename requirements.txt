@@ -1,5 +1,6 @@
-fastapi
-uvicorn
-requests
-firebase-admin
-yfinance
+fastapi>=0.100.0
+uvicorn>=0.22.0
+firebase-admin>=6.2.0
+yfinance>=0.2.28
+httpx>=0.24.1
+
