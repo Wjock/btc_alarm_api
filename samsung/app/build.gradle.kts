@@ -1,12 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
+    // Plug-in do Google Services para conectar o app ao Firebase
+    id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.btcalarm"
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.btcalarm"
@@ -20,9 +20,7 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
         }
     }
     compileOptions {
@@ -40,4 +38,13 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    
+    // Suas bibliotecas de rede atuais (Retrofit)
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+
+    // Bibliotecas estáveis do Firebase sem duplicações
+    implementation("com.google.firebase:firebase-common-ktx:21.0.0")
+    implementation("com.google.firebase:firebase-messaging-ktx:24.0.0")
 }
+

@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "BTC Alarm"
 include(":app")
+include(":app")

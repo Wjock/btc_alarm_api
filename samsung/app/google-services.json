@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "610190229056",
+    "project_id": "btc-alarm-api",
+    "storage_bucket": "btc-alarm-api.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:610190229056:android:9e9ee01c86d80fa722e9a5",
+        "android_client_info": {
+          "package_name": "com.example.btcalarm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUMDOIAuz7arTF4Ntno6ryNU3Y5W7TXyQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
