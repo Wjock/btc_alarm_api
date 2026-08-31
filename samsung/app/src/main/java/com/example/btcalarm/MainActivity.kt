@@ -34,13 +34,18 @@ class MainActivity : AppCompatActivity() {
     private fun enviarAlvoParaRender(valorAlvo: Double) {
         thread {
             try {
-                val url = URL("https://btc-alarm-api.onrender.com/definir-alvo")
+                val url = URL("https://btc-alarm-api.onrender.com/configurar_alarme")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json; utf-8")
                 conn.doOutput = true
 
-                val jsonPayload = "{\"alvo\": $valorAlvo}"
+                val jsonPayload = """
+                    {
+                        "preco_alvo": $valorAlvo,
+                        "fcm_token": ""
+                    }
+                """.trimIndent()
 
                 OutputStreamWriter(conn.outputStream, "UTF-8").use { os ->
                     os.write(jsonPayload)
