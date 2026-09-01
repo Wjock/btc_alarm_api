@@ -47,7 +47,7 @@ async def obter_preco_btc():
     return None
 
 def send_fcm_notification(price: float):
-    """Envia notificação Push de Alta Prioridade para acordar o celular e tocar o alarme"""
+    """Envia notificação Push com prioridade máxima e som de alarme"""
     if not device_tokens:
         logger.info("Nenhum token cadastrado para envio.")
         return
@@ -61,9 +61,11 @@ def send_fcm_notification(price: float):
             android=messaging.AndroidConfig(
                 priority="high",
                 notification=messaging.AndroidNotification(
-                    sound="default",
+                    sound="alarm",  # Força o som de alarme do dispositivo
                     channel_id="btc_alarm_channel",
-                    priority="high"
+                    priority="high",
+                    default_sound=True,
+                    default_vibrate_timings=True
                 )
             ),
             token=token,
@@ -73,7 +75,8 @@ def send_fcm_notification(price: float):
             logger.info(f"Notificação enviada com sucesso para: {token[:10]}...")
         except Exception as e:
             logger.error(f"Erro ao enviar para o token {token[:10]}: {e}")
-
+            
+            
 async def monitor_loop():
     """Loop autônomo que roda permanentemente no servidor Render a cada 30s"""
     logger.info(">>> MONITOR AUTÔNOMO EM NUVEM INICIADO COM SUCESSO <<<")
