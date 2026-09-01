@@ -4,15 +4,41 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="24dp"
-    android:gravity="center">
+    android:paddingTop="48dp"
+    android:gravity="center_horizontal">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="BTC Alarm"
-        android:textSize="24sp"
+        android:textSize="26sp"
         android:textStyle="bold"
-        android:layout_marginBottom="32dp" />
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvPrecoAtual"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BTC Atual: Carregando..."
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="#1B5E20"
+        android:layout_marginBottom="20dp" />
+
+    <!-- Campo Fixo para Exibir o Alarme Definido/Atingido -->
+    <TextView
+        android:id="@+id/tvStatusAlarme"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nenhum alarme definido"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textAlignment="center"
+        android:padding="12dp"
+        android:background="#E0F7FA"
+        android:textColor="#006064"
+        android:layout_marginBottom="24dp" />
 
     <EditText
         android:id="@+id/etAlvo"
@@ -27,7 +53,7 @@
         android:id="@+id/btnDefinir"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Definir Alarme"
+        android:text="Definir Novo Alarme"
         android:padding="12dp" />
 
 </LinearLayout>
