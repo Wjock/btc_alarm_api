@@ -46,15 +46,22 @@ def get_btc_price():
 def send_fcm_notification(token: str, title: str, body: str):
     try:
         message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
+            # Envia os dados brutos que o seu MyFirebaseMessagingService.kt lê
+            data={
+                "title": title,
+                "body": body,
+            },
+            # Configuração específica para o Android acordar a CPU e a tela
             android=messaging.AndroidConfig(
                 priority='high',
+                ttl=0,  # Entrega imediata sem armazenamento em fila
                 notification=messaging.AndroidNotification(
+                    title=title,
+                    body=body,
                     sound='default',
-                    channel_id='btc_alarm_channel'
+                    channel_id='btc_alarm_channel',
+                    priority='max',
+                    visibility='public'
                 )
             ),
             token=token,
@@ -63,7 +70,8 @@ def send_fcm_notification(token: str, title: str, body: str):
         logger.info(f"Notificação enviada com sucesso: {response}")
     except Exception as e:
         logger.error(f"Erro ao enviar notificação FCM: {e}")
-
+        
+        
 async def monitor_btc_loop():
     logger.info(">>> MONITOR AUTÔNOMO EM NUVEM INICIADO COM SUCESSO <<<")
     while True:
