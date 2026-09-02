@@ -8,8 +8,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-# Configuração de Logs
-logging.basicConfig(level=logging.INFO)
+# Configuração de Logs com Data e Hora
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger("btc_alarm")
 
 # Variáveis Globais de Memória
@@ -46,37 +50,7 @@ async def obter_preco_btc():
         logger.warning(f"Falha ao obter preço via Coinbase no Render: {e}")
     return None
 
-def send_fcm_notification(price: float):
-    """Envia notificação Push com prioridade máxima e som de alarme"""
-    if not device_tokens:
-        logger.info("Nenhum token cadastrado para envio.")
-        return
 
-    for token in list(device_tokens):
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title="🎯 ALVO ATINGIDO! 🎯",
-                body=f"O BTC atingiu a meta! Preço atual: US$ {price:,.2f}"
-            ),
-            android=messaging.AndroidConfig(
-                priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="alarm",  # Força o som de alarme do dispositivo
-                    channel_id="btc_alarm_channel",
-                    priority="high",
-                    default_sound=True,
-                    default_vibrate_timings=True
-                )
-            ),
-            token=token,
-        )
-        try:
-            messaging.send(message)
-            logger.info(f"Notificação enviada com sucesso para: {token[:10]}...")
-        except Exception as e:
-            logger.error(f"Erro ao enviar para o token {token[:10]}: {e}")
-            
-            
 async def monitor_loop():
     """Loop autônomo que roda permanentemente no servidor Render a cada 30s"""
     logger.info(">>> MONITOR AUTÔNOMO EM NUVEM INICIADO COM SUCESSO <<<")
