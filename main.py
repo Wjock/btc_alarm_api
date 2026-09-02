@@ -30,33 +30,25 @@ device_tokens = set()
 alarm_settings = {"target_price": 0.0, "initial_price": 0.0, "active": False}
 background_tasks = set()
 
-# Função para enviar a notificação Push via Firebase FCM (Forçando tela acesa)
+# Função para enviar Push via Data Payload (Garante execução do app em tela apagada)
 def send_fcm_notification(token: str, title: str, body: str):
     try:
         message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
+            data={
+                "title": title,
+                "body": body,
+                "type": "alarm"
+            },
             android=messaging.AndroidConfig(
                 priority='high',
-                ttl=0,  # Entrega imediata sem atraso na fila
-                notification=messaging.AndroidNotification(
-                    sound='default',
-                    channel_id='btc_alarm_channel',
-                    priority='max',  # Prioridade máxima no sistema de notificações
-                    visibility='public',  # Aparece na tela de bloqueio
-                    default_vibrate_timings=True,
-                    default_sound=True
-                )
+                ttl=0
             ),
             token=token,
         )
         response = messaging.send(message)
-        logger.info(f"Notificação enviada com sucesso: {response}")
+        logger.info(f"Notificação Data enviada com sucesso: {response}")
     except Exception as e:
-        logger.error(f"Erro ao enviar notificação FCM: {e}")
-        
+        logger.error(f"Erro ao enviar notificação FCM: {e}")        
         
 # Função para consultar o preço do BTC na Coinbase
 async def get_btc_price():
