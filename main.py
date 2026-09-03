@@ -1,129 +1,152 @@
 import os
-import asyncio
+import httpx
 import logging
-import requests
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+import asyncio
 import firebase_admin
 from firebase_admin import credentials, messaging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
-# Configuração de Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Configuração de Logs
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("btc_alarm")
 
-app = FastAPI()
+# Variáveis Globais de Memória
+device_tokens = set()
+alarm_settings = {"target_price": 0.0, "initial_price": 0.0, "active": False}
+background_tasks = set()
 
-# Inicializa o Firebase Admin SDK
-if not firebase_admin._apps:
-    cred = credentials.Certificate("serviceAccountKey.json")
+# Inicialização do Firebase Admin SDK
+FIREBASE_KEY_PATH = "firebase-key.json"
+RENDER_KEY_PATH = "/etc/secrets/serviceAccountKey.json"
+
+if os.path.exists(FIREBASE_KEY_PATH):
+    cred = credentials.Certificate(FIREBASE_KEY_PATH)
+    firebase_admin.initialize_app(cred)
+    logger.info("Firebase Admin SDK inicializado localmente.")
+elif os.path.exists(RENDER_KEY_PATH):
+    cred = credentials.Certificate(RENDER_KEY_PATH)
     firebase_admin.initialize_app(cred)
     logger.info("Firebase Admin SDK inicializado no Render.")
+else:
+    logger.warning("AVISO: Credenciais do Firebase não encontradas.")
 
-# Estado do Alarme em Memória
-alarm_state = {
-    "target_price": 0.0,
-    "fcm_token": None,
-    "is_active": False
-}
-
-class TokenRequest(BaseModel):
-    token: String = None  # Aceita token do app
-
-class AlarmRequest(BaseModel):
-    target_price: float
-    token: str
-
-def get_btc_price():
+async def obter_preco_btc():
+    """Consulta a cotação spot na Coinbase pública"""
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        return float(data["bitcoin"]["usd"])
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            r = await client.get(
+                "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            if r.status_code == 200:
+                return float(r.json()["data"]["amount"])
     except Exception as e:
-        logger.error(f"Erro ao buscar preço do BTC: {e}")
-        return None
+        logger.warning(f"Falha ao obter preço via Coinbase no Render: {e}")
+    return None
 
-def send_fcm_notification(token: str, title: str, body: str):
-    try:
+def send_fcm_notification(price: float):
+    """Envia notificação Push de Alta Prioridade para acordar o celular e tocar o alarme"""
+    if not device_tokens:
+        logger.info("Nenhum token cadastrado para envio.")
+        return
+
+    for token in list(device_tokens):
         message = messaging.Message(
-            # Envia os dados brutos que o seu MyFirebaseMessagingService.kt lê
-            data={
-                "title": title,
-                "body": body,
-            },
-            # Configuração específica para o Android acordar a CPU e a tela
+            notification=messaging.Notification(
+                title="🎯 ALVO ATINGIDO! 🎯",
+                body=f"O BTC atingiu a meta! Preço atual: US$ {price:,.2f}"
+            ),
             android=messaging.AndroidConfig(
-                priority='high',
-                ttl=0,  # Entrega imediata sem armazenamento em fila
+                priority="high",
                 notification=messaging.AndroidNotification(
-                    title=title,
-                    body=body,
-                    sound='default',
-                    channel_id='btc_alarm_channel',
-                    priority='max',
-                    visibility='public'
+                    sound="default",
+                    channel_id="btc_alarm_channel",
+                    priority="high"
                 )
             ),
             token=token,
         )
-        response = messaging.send(message)
-        logger.info(f"Notificação enviada com sucesso: {response}")
-    except Exception as e:
-        logger.error(f"Erro ao enviar notificação FCM: {e}")
-        
-        
-async def monitor_btc_loop():
+        try:
+            messaging.send(message)
+            logger.info(f"Notificação enviada com sucesso para: {token[:10]}...")
+        except Exception as e:
+            logger.error(f"Erro ao enviar para o token {token[:10]}: {e}")
+
+async def monitor_loop():
+    """Loop autônomo que roda permanentemente no servidor Render a cada 30s"""
     logger.info(">>> MONITOR AUTÔNOMO EM NUVEM INICIADO COM SUCESSO <<<")
     while True:
-        if alarm_state["is_active"] and alarm_state["target_price"] > 0 and alarm_state["fcm_token"]:
-            current_price = get_btc_price()
-            if current_price:
-                target = alarm_state["target_price"]
-                logger.info(f"[Monitor Render 30s] Atual: USD {current_price:.2f} | Alvo: USD {target:.2f}")
-                
-                # Dispara se o preço cruzar a meta
-                if current_price >= target:
-                    logger.info("🎯 META ATINGIDA! Disparando notificação FCM...")
-                    send_fcm_notification(
-                        alarm_state["fcm_token"],
-                        "🚨 ALERTA BITCOIN! 🚨",
-                        f"O BTC atingiu USD {current_price:.2f} (Meta: USD {target:.2f})"
-                    )
-                    alarm_state["is_active"] = False
-        else:
-            logger.info("[Monitor Render 30s] Servidor ativo e aguardando alarme ser definido no app...")
-        
+        try:
+            active = alarm_settings.get("active", False)
+            target_price = float(alarm_settings.get("target_price", 0.0))
+            initial_price = float(alarm_settings.get("initial_price", 0.0))
+
+            if active and target_price > 0.0:
+                current_price = await obter_preco_btc()
+                if current_price:
+                    logger.info(f"[Monitor Render 30s] Atual: USD {current_price:.2f} | Alvo: USD {target_price:.2f}")
+                    
+                    atingiu_alta = (target_price >= initial_price) and (current_price >= target_price)
+                    atingiu_baixa = (target_price < initial_price) and (current_price <= target_price)
+
+                    if atingiu_alta or atingiu_baixa:
+                        logger.info("🚨 ALVO ATINGIDO NO RENDER! Disparando Push urgente para o Android...")
+                        send_fcm_notification(current_price)
+                        alarm_settings["active"] = False
+            else:
+                logger.info("[Monitor Render 30s] Servidor ativo e aguardando alarme ser definido no app...")
+
+        except Exception as e:
+            logger.error(f"Erro no loop de monitoramento: {e}")
+
         await asyncio.sleep(30)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(monitor_btc_loop())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Garante que a tarefa assíncrona seja mantida viva na memória do servidor
+    task = asyncio.create_task(monitor_loop())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+    yield
 
-# Rota para o UptimeRobot e testes (Aceita GET e HEAD)
-@app.api_route("/", methods=["GET", "HEAD"])
+app = FastAPI(title="BTC Alarm API", lifespan=lifespan)
+
+class TokenSchema(BaseModel):
+    token: str
+
+class AlarmSchema(BaseModel):
+    target_price: float
+    active: bool
+
+@app.get("/")
 def read_root():
-    return {"status": "ok", "message": "Servidor BTC Alarm Ativo"}
+    return {"status": "online", "message": "API BTC Alarm com Monitor Ativo em NUVEM!"}
 
 @app.post("/register-token")
-def register_token(req: dict):
-    token = req.get("token")
-    if token:
-        alarm_state["fcm_token"] = token
-        logger.info(f"Token registrado com sucesso: {token[:10]}...")
-        return {"status": "sucesso"}
-    return {"status": "erro", "message": "Token ausente"}
+def register_token(data: TokenSchema):
+    device_tokens.add(data.token)
+    logger.info(f"Token registrado. Total de tokens ativos: {len(device_tokens)}")
+    return {"status": "sucesso", "registered_tokens": len(device_tokens)}
 
 @app.post("/set-alarm")
-def set_alarm(req: AlarmRequest):
-    alarm_state["target_price"] = req.target_price
-    alarm_state["fcm_token"] = req.token
-    alarm_state["is_active"] = True
-    logger.info(f"Alarme definido para USD {req.target_price:.2f}")
-    return {"status": "sucesso", "target_price": req.target_price}
+async def set_alarm(data: AlarmSchema):
+    current_price = await obter_preco_btc() or data.target_price
+    # Se a Coinbase falhar no segundo do clique, assume o valor do alvo como base segura
+    if not current_price:
+        current_price = data.target_price
+    alarm_settings["target_price"] = data.target_price
+    alarm_settings["initial_price"] = current_price
+    alarm_settings["active"] = data.active
+    logger.info(f"Alarme ativo recebido do celular: Alvo={data.target_price} | Inicial={current_price}")
+    return {"status": "sucesso", "config": alarm_settings}
 
-@app.post("/stop-alarm")
-def stop_alarm():
-    alarm_state["is_active"] = False
-    alarm_state["target_price"] = 0.0
-    logger.info("Alarme cancelado pelo usuário.")
-    return {"status": "sucesso"}
+@app.get("/check-price")
+async def check_price():
+    price = await obter_preco_btc()
+    return {
+        "btc_price_usd": price,
+        "target_price": alarm_settings.get("target_price", 0.0),
+        "alarm_active": alarm_settings.get("active", False)
+    }
